@@ -26,6 +26,15 @@ export const createEvent = async (title: string, startTime: string, endTime: str
   return response.data;
 };
 
+export const updateEvent = async (id: string, title: string, startTime: string, endTime: string) => {
+  const response = await axios.put<CalendarEvent>(`${API_URL}/${id}`, {
+    title,
+    startTime,
+    endTime,
+  });
+  return response.data;
+};
+
 export const deleteEvent = async (id: string) => {
   await axios.delete(`${API_URL}/${id}`);
 };

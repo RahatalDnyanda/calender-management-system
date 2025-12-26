@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { startOfWeek, addDays, format, startOfDay, addHours, isSameDay, getDay } from 'date-fns';
-import { fetchEvents, createEvent, deleteEvent, type CalendarEvent } from '../api';
+import { fetchEvents, createEvent, updateEvent, deleteEvent, type CalendarEvent } from '../api';
 import { ChevronLeft, ChevronRight, Trash2, Calendar as CalendarIcon, AlertCircle, Plus, LoaderCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 import { EventModal } from './EventModal';
@@ -13,6 +13,7 @@ export const Calendar = () => {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialDate, setModalInitialDate] = useState<Date>(new Date());
+  const [eventToEdit, setEventToEdit] = useState<CalendarEvent | null>(null);
 
   const startDate = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday start
 
@@ -36,14 +37,28 @@ export const Calendar = () => {
     loadEvents();
   }, [currentDate]);
 
-  const handleCreate = async (title: string, startTime: string, endTime:string) => {
-    // This function is now passed to the modal
-    const newEvent = await createEvent(title, startTime, endTime);
-    setEvents(prevEvents => [...prevEvents, newEvent].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
+  const handleSaveEvent = async (data: { id?: string; title: string; startTime: string; endTime: string }) => {
+    if (data.id) {
+      // Update logic
+      const updatedEvent = await updateEvent(data.id, data.title, data.startTime, data.endTime);
+      setEvents(prevEvents => 
+        prevEvents.map(event => event.id === data.id ? updatedEvent : event)
+      );
+    } else {
+      // Create logic
+      const newEvent = await createEvent(data.title, data.startTime, data.endTime);
+      setEvents(prevEvents => [...prevEvents, newEvent].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
+    }
   };
 
   const openAddModal = (date: Date) => {
+    setEventToEdit(null);
     setModalInitialDate(date);
+    setIsModalOpen(true);
+  };
+
+  const openEditModal = (event: CalendarEvent) => {
+    setEventToEdit(event);
     setIsModalOpen(true);
   };
 
@@ -65,9 +80,10 @@ export const Calendar = () => {
     <>
       <EventModal 
         isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        onSubmit={handleCreate}
+        onClose={() => { setIsModalOpen(false); setEventToEdit(null); }} 
+        onSubmit={handleSaveEvent}
         initialDate={modalInitialDate}
+        eventToEdit={eventToEdit}
       />
       <div className="flex flex-col h-screen bg-background text-foreground font-sans">
       {/* --- Top Navigation Bar --- */}
@@ -165,6 +181,7 @@ export const Calendar = () => {
 
               return (
                 <div
+                  onClick={() => openEditModal(event)}
                   key={event.id}
                   className="absolute p-2 rounded-lg border-l-4 text-xs shadow-md hover:shadow-lg transition-all cursor-pointer group z-10 overflow-hidden bg-primary/10 border-primary"
                   style={{

@@ -1,27 +1,35 @@
 import React, { useState, useEffect } from 'react';
 import { X, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import type { CalendarEvent as EventType } from '../api';
 
 interface EventModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (title: string, startTime: string, endTime: string) => Promise<void>;
+  onSubmit: (data: { id?: string; title: string; startTime: string; endTime: string }) => Promise<void>;
   initialDate?: Date;
+  eventToEdit?: EventType | null;
 }
 
-export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSubmit, initialDate }) => {
+export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSubmit, initialDate, eventToEdit }) => {
   const [title, setTitle] = useState('');
   const [selectedDate, setSelectedDate] = useState(format(initialDate || new Date(), 'yyyy-MM-dd'));
   const [selectedStartHour, setSelectedStartHour] = useState('09:00');
   const [selectedEndHour, setSelectedEndHour] = useState('10:00');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isEditMode = !!eventToEdit;
 
   useEffect(() => {
-    if (initialDate) {
+    if (isEditMode) {
+      setTitle(eventToEdit.title);
+      setSelectedDate(format(new Date(eventToEdit.startTime), 'yyyy-MM-dd'));
+      setSelectedStartHour(format(new Date(eventToEdit.startTime), 'HH:mm'));
+      setSelectedEndHour(format(new Date(eventToEdit.endTime), 'HH:mm'));
+    } else if (initialDate) {
       setSelectedDate(format(initialDate, 'yyyy-MM-dd'));
     }
-  }, [initialDate, isOpen]);
+  }, [eventToEdit, initialDate, isOpen]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,7 +45,12 @@ export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSubmi
         return;
       }
 
-      await onSubmit(title, startDateTime.toISOString(), endDateTime.toISOString());
+      await onSubmit({ 
+        id: isEditMode ? eventToEdit.id : undefined,
+        title, 
+        startTime: startDateTime.toISOString(), 
+        endTime: endDateTime.toISOString() 
+      });
       setTitle('');
       onClose();
     } catch (err: any) {
@@ -59,7 +72,7 @@ export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSubmi
         <button onClick={onClose} className="absolute top-3 right-3 text-foreground/50 hover:text-foreground">
           <X size={24} />
         </button>
-        <h2 className="text-xl font-bold mb-4 text-foreground">Add New Event</h2>
+        <h2 className="text-xl font-bold mb-4 text-foreground">{isEditMode ? 'Edit Event' : 'Add New Event'}</h2>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -95,7 +108,7 @@ export const EventModal: React.FC<EventModalProps> = ({ isOpen, onClose, onSubmi
               Cancel
             </button>
             <button type="submit" disabled={isSubmitting} className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-md text-sm font-medium shadow-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
-              {isSubmitting ? 'Saving...' : 'Save Event'}
+              {isSubmitting ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Save Event')}
             </button>
           </div>
         </form>
