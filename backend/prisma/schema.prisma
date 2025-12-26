@@ -16,5 +16,17 @@ model Event {
   endTime     DateTime
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // --- Recurrence Fields ---
+  rrule             String? // For master recurring events, stores the RRULE string.
+
+  // For exception events
+  recurrenceId      String?   // If this is an exception, it points to the master event's ID.
+  originalStartTime DateTime? // The original start time of the occurrence this event is an exception for.
+
+  // If an exception's only purpose is to cancel an occurrence, this is true.
+  isCancelled       Boolean   @default(false)
+
   @@index([startTime])
+  @@index([recurrenceId, originalStartTime])
 }

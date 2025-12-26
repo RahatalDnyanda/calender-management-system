@@ -7,7 +7,13 @@ export interface CalendarEvent {
   id: string;
   title: string;
   startTime: string; 
-  endTime: string;   
+  endTime: string;
+  // Recurrence properties from the backend
+  rrule?: string;
+  isRecurringInstance?: boolean;
+  masterId?: string;
+  recurrenceId?: string;
+  originalStartTime?: string;
 }
 
 export const fetchEvents = async (start: string, end: string) => {
@@ -17,20 +23,26 @@ export const fetchEvents = async (start: string, end: string) => {
   return response.data;
 };
 
-export const createEvent = async (title: string, startTime: string, endTime: string) => {
+export const createEvent = async (data: Partial<CalendarEvent>) => {
   const response = await axios.post<CalendarEvent>(API_URL, {
-    title,
-    startTime,
-    endTime,
+    title: data.title,
+    startTime: data.startTime,
+    endTime: data.endTime,
+    rrule: data.rrule,
+    // For creating exceptions
+    recurrenceId: data.recurrenceId,
+    originalStartTime: data.originalStartTime,
+    isCancelled: data.isCancelled,
   });
   return response.data;
 };
 
-export const updateEvent = async (id: string, title: string, startTime: string, endTime: string) => {
+export const updateEvent = async (id: string, title: string, startTime: string, endTime: string, rrule?: string) => {
   const response = await axios.put<CalendarEvent>(`${API_URL}/${id}`, {
     title,
     startTime,
     endTime,
+    rrule,
   });
   return response.data;
 };

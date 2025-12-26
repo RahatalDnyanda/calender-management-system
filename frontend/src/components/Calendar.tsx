@@ -1,10 +1,28 @@
-import React, { useEffect, useState } from 'react';
-import { startOfWeek, addDays, format, startOfDay, addHours, isSameDay, getDay } from 'date-fns';
+import React, { useEffect, useState, useRef } from 'react';
+import { startOfWeek, addDays, format, startOfDay, addHours, isSameDay, getDay, add, roundToNearestMinutes } from 'date-fns';
 import { fetchEvents, createEvent, updateEvent, deleteEvent, type CalendarEvent } from '../api';
 import { ChevronLeft, ChevronRight, Trash2, Calendar as CalendarIcon, AlertCircle, Plus, LoaderCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 import { EventModal } from './EventModal';
 import { ThemeToggle } from './ThemeToggle';
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, useDraggable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
+
+interface DraggableEventProps {
+  event: CalendarEvent;
+  children: React.ReactNode;
+  style: React.CSSProperties;
+}
+
+const DraggableEvent = ({ event, children, style: positionStyle }: DraggableEventProps) => {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: event.id, data: { event } });
+  const style = {
+    ...positionStyle,
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1, // Make the original item semi-transparent while dragging
+  };
+  return <div ref={setNodeRef} style={style} className="absolute" {...listeners} {...attributes}>{children}</div>;
+};
 
 export const Calendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -14,6 +32,8 @@ export const Calendar = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalInitialDate, setModalInitialDate] = useState<Date>(new Date());
   const [eventToEdit, setEventToEdit] = useState<CalendarEvent | null>(null);
+  const [activeEvent, setActiveEvent] = useState<CalendarEvent | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const startDate = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday start
 
@@ -37,18 +57,87 @@ export const Calendar = () => {
     loadEvents();
   }, [currentDate]);
 
-  const handleSaveEvent = async (data: { id?: string; title: string; startTime: string; endTime: string }) => {
-    if (data.id) {
-      // Update logic
-      const updatedEvent = await updateEvent(data.id, data.title, data.startTime, data.endTime);
-      setEvents(prevEvents => 
-        prevEvents.map(event => event.id === data.id ? updatedEvent : event)
-      );
-    } else {
-      // Create logic
-      const newEvent = await createEvent(data.title, data.startTime, data.endTime);
-      setEvents(prevEvents => [...prevEvents, newEvent].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()));
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 10 }, // Require a 10px drag to start
+    })
+  );
+
+  const handleDragStart = (event: any) => {
+    setActiveEvent(event.active.data.current?.event ?? null);
+  };
+
+  const handleDragEnd = async (event: any) => {
+    const { active, delta } = event;
+    setActiveEvent(null);
+
+    const draggedEvent = active.data.current?.event as CalendarEvent;
+    if (!draggedEvent || (delta.x === 0 && delta.y === 0) || !gridRef.current) {
+      return;
     }
+
+    // --- Calculate new times from drag delta ---
+    const dayWidth = gridRef.current.offsetWidth / 8; // 8 columns
+    const hourHeight = 80; // h-20 = 5rem = 80px
+
+    const daysDragged = Math.round(delta.x / dayWidth);
+    const minutesDragged = Math.round((delta.y / hourHeight) * 60);
+
+    const originalStart = new Date(draggedEvent.startTime);
+    const duration = new Date(draggedEvent.endTime).getTime() - originalStart.getTime();
+
+    let newStart = add(originalStart, { days: daysDragged, minutes: minutesDragged });
+    newStart = roundToNearestMinutes(newStart, { nearestTo: 15 }); // Snap to 15-min intervals
+    const newEnd = new Date(newStart.getTime() + duration);
+
+    // --- Optimistic Update ---
+    const originalEvents = [...events];
+    setEvents(prev => prev.map(e => e.id === draggedEvent.id ? { ...e, startTime: newStart.toISOString(), endTime: newEnd.toISOString() } : e));
+
+    // --- API Call ---
+    try {
+      // If it's a recurring instance, we create a new "exception" event.
+      if (draggedEvent.isRecurringInstance) {
+        await createEvent({
+          title: draggedEvent.title,
+          startTime: newStart.toISOString(),
+          endTime: newEnd.toISOString(),
+          recurrenceId: draggedEvent.masterId,
+          originalStartTime: draggedEvent.startTime, // The original time of the instance we're moving
+        });
+      } else {
+        // Otherwise, it's a simple update.
+        await updateEvent(draggedEvent.id, draggedEvent.title, newStart.toISOString(), newEnd.toISOString());
+      }
+      await loadEvents(); // Reload to get official data and new IDs
+    } catch (err) {
+      setError("Failed to move event. It might conflict with another.");
+      setEvents(originalEvents); // Revert on failure
+    }
+  };
+
+  const handleSaveEvent = async (data: Partial<CalendarEvent> & { id?: string }) => {
+    const isEditingRecurringInstance = eventToEdit?.isRecurringInstance;
+
+    // If we are "editing" a recurring instance, we must create an exception event.
+    if (isEditingRecurringInstance) {
+      await createEvent({
+        title: data.title,
+        startTime: data.startTime,
+        endTime: data.endTime,
+        recurrenceId: eventToEdit.masterId,
+        originalStartTime: eventToEdit.startTime, // The original time of the instance we're editing
+      });
+    } 
+    // If we are editing a master or single event
+    else if (data.id) {
+      await updateEvent(data.id, data.title!, data.startTime!, data.endTime!, data.rrule);
+    } 
+    // If we are creating a new event (could be single or recurring)
+    else {
+      await createEvent(data);
+    }
+    await loadEvents(); // Reload all events to show changes
   };
 
   const openAddModal = (date: Date) => {
@@ -62,14 +151,37 @@ export const Calendar = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this event?")) return;
+  const handleDelete = async (eventToDelete: CalendarEvent) => {
     try {
-      await deleteEvent(id);
-      // On success, remove the event from the local state.
-      setEvents(prevEvents => prevEvents.filter(event => event.id !== id));
+      // For a recurring instance, create a cancellation exception
+      if (eventToDelete.isRecurringInstance) {
+        if (!confirm("This is part of a series. Do you want to delete only this occurrence?")) return;
+        await createEvent({
+          recurrenceId: eventToDelete.masterId,
+          originalStartTime: eventToDelete.startTime,
+          isCancelled: true,
+          // Provide required fields, even if not used for cancellation display
+          title: eventToDelete.title || "Cancelled",
+          startTime: eventToDelete.startTime,
+          endTime: eventToDelete.endTime,
+        });
+        await loadEvents();
+      } 
+      // For a master recurring event
+      else if (eventToDelete.rrule) {
+        if (!confirm("This is a recurring event. Deleting it will remove all future occurrences. Are you sure?")) return;
+        await deleteEvent(eventToDelete.id);
+        await loadEvents();
+      }
+      // For a simple, non-recurring event or an exception
+      else {
+        if (!confirm("Are you sure you want to delete this event?")) return;
+        await deleteEvent(eventToDelete.id);
+        setEvents(prev => prev.filter(e => e.id !== eventToDelete.id));
+      }
     } catch (err) {
-      setError("Failed to delete event.");
+      console.error("Delete failed:", err);
+      setError("Failed to delete the event.");
     }
   };
 
@@ -86,6 +198,7 @@ export const Calendar = () => {
         eventToEdit={eventToEdit}
       />
       <div className="flex flex-col h-screen bg-background text-foreground font-sans">
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       {/* --- Top Navigation Bar --- */}
       <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-card shadow-sm z-30">
         <div className="flex items-center gap-4">
@@ -127,7 +240,7 @@ export const Calendar = () => {
             <LoaderCircle size={48} className="text-primary animate-spin" />
           </div>
         )}
-        <div className="grid grid-cols-8 min-w-[1000px]">
+        <div ref={gridRef} className="grid grid-cols-8 min-w-[1000px]">
           
           {/* Header Row (Sticky) */}
           <div className="col-span-8 grid grid-cols-8 sticky top-0 z-20 bg-card border-b border-border shadow-sm">
@@ -179,35 +292,34 @@ export const Calendar = () => {
               const startHour = start.getHours() + start.getMinutes() / 60;
               const duration = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
 
-              return (
-                <div
-                  onClick={() => openEditModal(event)}
-                  key={event.id}
-                  className="absolute p-2 rounded-lg border-l-4 text-xs shadow-md hover:shadow-lg transition-all cursor-pointer group z-10 overflow-hidden bg-primary/10 border-primary"
-                  style={{
-                    top: `${startHour * 5}rem`, // 5rem = h-20 (80px height per hour)
-                    height: `${duration * 5}rem`,
-                    // Position based on grid columns. 12.5% is 1/8th of the grid width.
-                    // The first 12.5% is the time column.
-                    left: `${dayIndex * 12.5}%`,
-                    width: '12.5%',
-                    // Add a little padding inside the column
-                    padding: '0.5rem'
-                  }}
-                >
-                  <div className="flex justify-between items-start">
-                    <span className="font-bold text-primary-dark dark:text-primary-light truncate">{event.title}</span>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDelete(event.id); }}
-                      className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 p-1 bg-card/80 rounded-full shadow-sm"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                  <div className="text-primary/80 mt-1 font-medium">
-                    {format(start, 'h:mm')} - {format(end, 'h:mm a')}
-                  </div>
+              const eventStyle = {
+                top: `${startHour * 5}rem`,
+                height: `${duration * 5}rem`,
+                left: `${(dayIndex) * 12.5}%`,
+                width: '12.5%',
+              };
+
+              const eventContent = (
+                <div onClick={() => openEditModal(event)} className="p-2 rounded-lg border-l-4 text-xs shadow-md hover:shadow-lg transition-all cursor-grab group z-10 overflow-hidden bg-primary/10 border-primary h-full w-full">
+                    <div className="flex justify-between items-start">
+                      <span className="font-bold text-primary-dark dark:text-primary-light truncate">{event.title}</span>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); handleDelete(event); }}
+                        className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 p-1 bg-card/80 rounded-full shadow-sm"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                    <div className="text-primary/80 mt-1 font-medium">
+                      {format(start, 'h:mm')} - {format(end, 'h:mm a')}
+                    </div>
                 </div>
+              );
+
+              return (
+                <DraggableEvent key={event.id} event={event} style={eventStyle}>
+                  {eventContent}
+                </DraggableEvent>
               );
             })}
             
@@ -226,8 +338,20 @@ export const Calendar = () => {
 
           </div>
         </div>
+        <DragOverlay>
+            {activeEvent ? (
+              <div className="p-2 rounded-lg border-l-4 text-xs shadow-lg z-50 overflow-hidden bg-primary/20 border-primary" style={{ height: `${(new Date(activeEvent.endTime).getTime() - new Date(activeEvent.startTime).getTime()) / (1000 * 60 * 60) * 5}rem`, width: `${gridRef.current ? gridRef.current.offsetWidth / 8 : 150}px`}}>
+                <div className="font-bold text-primary-dark dark:text-primary-light truncate">{activeEvent.title}</div>
+                <div className="text-primary/80 mt-1 font-medium">
+                  {format(new Date(activeEvent.startTime), 'h:mm')} - {format(new Date(activeEvent.endTime), 'h:mm a')}
+                </div>
+              </div>
+            ) : null}
+          </DragOverlay>
       </div>
+      </DndContext>
     </div>
     </>
   );
 };
+    
