@@ -1,3 +1,44 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 5% 96%; /* Off-white (Cool Gray) */
+    --foreground: 240 10% 3.9%; /* Dark Slate */
+    --card: 240 5% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 221 83% 53%; /* Blue */
+    --primary-foreground: 210 40% 98%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 221 83% 53%;
+  }
+ 
+  .dark {
+    --background: 240 10% 3.9%; /* Very Dark Slate */
+    --foreground: 240 5% 96%; /* Off-white */
+    --card: 240 10% 11.9%;
+    --card-foreground: 240 5% 96%;
+    --primary: 217 91% 60%; /* Brighter Blue for dark mode */
+    --primary-foreground: 222 47% 11%;
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-background text-foreground transition-colors duration-300;
+  }
+}
+
+/* Animations for Modals and Toasts */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes scale-in { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes slide-in-from-top { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+.animate-scale-in { animation: scale-in 0.2s ease-out; }
+.animate-slide-in { animation: slide-in-from-top 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
