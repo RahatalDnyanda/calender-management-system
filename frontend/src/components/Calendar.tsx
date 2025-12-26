@@ -205,7 +205,7 @@ export const Calendar = () => {
           <div className="bg-primary p-2 rounded-lg text-primary-foreground">
             <CalendarIcon size={24} />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Zenith Calendar</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Calendar</h1>
           <div className="flex items-center bg-background rounded-lg p-1 ml-6 border border-border">
             <button onClick={() => setCurrentDate(addDays(currentDate, -7))} className="p-1.5 hover:bg-card rounded transition-colors"><ChevronLeft size={20}/></button>
             <span className="px-4 font-semibold text-sm w-32 text-center">
